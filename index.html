@@ -60,7 +60,6 @@
 
             if (!apiKey || !channelId) {
                 alert('Please enter a valid API Key and Channel Link.');
-                console.log("API Key or Channel ID is missing or invalid.");
                 return;
             }
 
@@ -89,9 +88,24 @@
 
         async function fetchVideos(apiKey, channelId) {
             const url = `https://www.googleapis.com/youtube/v3/search?key=${apiKey}&channelId=${channelId}&part=snippet&type=video&order=date&maxResults=7`;
-            const response = await fetch(url);
-            const data = await response.json();
-            return data.items || [];
+
+            try {
+                const response = await fetch(url);
+                
+                // Check if the response is ok (status code 200)
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    console.error("Error response from YouTube API:", errorData);
+                    throw new Error("Failed to fetch data from YouTube");
+                }
+
+                const data = await response.json();
+                return data.items || [];
+            } catch (error) {
+                console.error("Error fetching videos:", error);
+                alert("Error fetching data from YouTube. Please check your API key and try again.");
+                throw error;
+            }
         }
 
         function generateVideoMetricsTable(videos) {
@@ -99,7 +113,7 @@
             table += '<tr><th>Current Month</th><th>Release Month</th><th>Conversion Ratio</th><th>Adjusted Views</th><th>Views</th></tr>';
 
             const currentMonth = new Date().toISOString().slice(0, 7);
-            videos.forEach((video, index) => {
+            videos.forEach((video) => {
                 const releaseDate = video.snippet.publishedAt.slice(0, 7);
                 const conversionRatio = calculateConversionRatio(currentMonth, releaseDate);
                 const adjustedViews = Math.round(video.statistics.viewCount * parseFloat(conversionRatio) / 100);
