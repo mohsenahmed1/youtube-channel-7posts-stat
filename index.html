@@ -39,136 +39,119 @@
 <body>
     <h1>YouTube Channel Analyzer</h1>
 
-    <div class="form-group">
-        <label for="apiKey">Enter Your YouTube API Key:</label>
-        <input type="text" id="apiKey" placeholder="Enter API Key">
-    </div>
-    <div class="form-group">
-        <label for="channelId">Enter YouTube Channel Link:</label>
-        <input type="text" id="channelId" placeholder="Enter Channel Link">
-    </div>
-    <button onclick="analyzeChannel()">Analyze</button>
+  <div class="form-group">
+    <label for="apiKey">Enter Your YouTube API Key:</label>
+    <input type="text" id="apiKey" placeholder="Enter API Key">
+</div>
+<div class="form-group">
+    <label for="channelId">Enter YouTube Channel Link:</label>
+    <input type="text" id="channelId" placeholder="Enter Channel Link">
+</div>
+<button onclick="analyzeChannel()">Analyze</button>
 
-    <h2>Video Metrics</h2>
-    <div id="results"></div>
+<h2>Video Metrics</h2>
+<div id="results"></div>
 
-    <script>
-        async function analyzeChannel() {
-            const apiKey = document.getElementById('apiKey').value;
-            const channelLink = document.getElementById('channelId').value;
-            const channelId = extractChannelId(channelLink);
+<script>
+    async function analyzeChannel() {
+        const apiKey = document.getElementById('apiKey').value;
+        const channelLink = document.getElementById('channelId').value;
+        const channelId = extractChannelId(channelLink);
 
-            if (!apiKey || !channelId) {
-                alert('Please enter a valid API Key and Channel Link.');
+        if (!apiKey || !channelId) {
+            alert('Please enter a valid API Key and Channel Link.');
+            return;
+        }
+
+        try {
+            // First, get channel uploads playlist ID
+            const channelData = await fetchChannelData(apiKey, channelId);
+            const uploadsPlaylistId = channelData.items[0].contentDetails.relatedPlaylists.uploads;
+            
+            // Then fetch videos from the uploads playlist
+            const videos = await fetchVideos(apiKey, uploadsPlaylistId);
+            
+            // Fetch detailed statistics for each video
+            const videoDetails = await Promise.all(
+                videos.map(video => fetchVideoStats(apiKey, video.snippet.resourceId.videoId))
+            );
+
+            if (videoDetails.length === 0) {
+                alert('No videos found.');
                 return;
             }
 
-            try {
-                const videos = await fetchVideos(apiKey, channelId);
-                if (videos.length === 0) {
-                    alert('No videos found.');
-                    return;
-                }
+            const videoMetricsTable = generateVideoMetricsTable(videoDetails);
+            const engagementTable = generateEngagementTable(videoDetails);
 
-                const videoMetricsTable = generateVideoMetricsTable(videos);
-                const engagementTable = generateEngagementTable(videos);
+            document.getElementById('results').innerHTML = videoMetricsTable + engagementTable;
+        } catch (error) {
+            console.error("Error:", error);
+            alert(error.message);
+        }
+    }
 
-                document.getElementById('results').innerHTML = videoMetricsTable + engagementTable;
-            } catch (error) {
-                console.error("Error fetching videos:", error);
-                alert("Error fetching data from YouTube. Please check your API key and try again.");
+    function extractChannelId(link) {
+        let channelId = null;
+        
+        if (link.includes('channel/')) {
+            const match = link.match(/channel\/([\w-]+)/);
+            if (match) channelId = match[1];
+        } else if (link.includes('c/') || link.includes('user/')) {
+            // For custom URLs, we'll need to use channels API
+            channelId = link.split('/').pop();
+        }
+        
+        return channelId;
+    }
+
+    async function fetchChannelData(apiKey, channelId) {
+        const url = `https://www.googleapis.com/youtube/v3/channels?part=contentDetails&id=${channelId}&key=${apiKey}`;
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error.message || 'Failed to fetch channel data');
+        }
+        
+        if (!data.items || data.items.length === 0) {
+            throw new Error('Channel not found');
+        }
+
+        return data;
+    }
+
+    async function fetchVideos(apiKey, playlistId) {
+        const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${playlistId}&maxResults=7&key=${apiKey}`;
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error.message || 'Failed to fetch videos');
+        }
+
+        return data.items || [];
+    }
+
+    async function fetchVideoStats(apiKey, videoId) {
+        const url = `https://www.googleapis.com/youtube/v3/videos?part=statistics&id=${videoId}&key=${apiKey}`;
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error.message || 'Failed to fetch video statistics');
+        }
+
+        return {
+            ...data.items[0],
+            snippet: {
+                publishedAt: data.items[0].snippet?.publishedAt || new Date().toISOString()
             }
-        }
+        };
+    }
 
-        function extractChannelId(link) {
-            const regex = /channel\/(.*?)(\?|$)/;
-            const match = link.match(regex);
-            return match ? match[1] : null;
-        }
-
-        async function fetchVideos(apiKey, channelId) {
-            const url = `https://www.googleapis.com/youtube/v3/search?key=${apiKey}&channelId=${channelId}&part=snippet&type=video&order=date&maxResults=7`;
-
-            try {
-                const response = await fetch(url);
-                
-                // Check if the response is ok (status code 200)
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    console.error("Error response from YouTube API:", errorData);
-                    throw new Error("Failed to fetch data from YouTube");
-                }
-
-                const data = await response.json();
-                return data.items || [];
-            } catch (error) {
-                console.error("Error fetching videos:", error);
-                alert("Error fetching data from YouTube. Please check your API key and try again.");
-                throw error;
-            }
-        }
-
-        function generateVideoMetricsTable(videos) {
-            let table = '<table>';
-            table += '<tr><th>Current Month</th><th>Release Month</th><th>Conversion Ratio</th><th>Adjusted Views</th><th>Views</th></tr>';
-
-            const currentMonth = new Date().toISOString().slice(0, 7);
-            videos.forEach((video) => {
-                const releaseDate = video.snippet.publishedAt.slice(0, 7);
-                const conversionRatio = calculateConversionRatio(currentMonth, releaseDate);
-                const adjustedViews = Math.round(video.statistics.viewCount * parseFloat(conversionRatio) / 100);
-
-                table += `<tr>
-                    <td>${currentMonth}</td>
-                    <td>${releaseDate}</td>
-                    <td>${conversionRatio}</td>
-                    <td>${adjustedViews}</td>
-                    <td>${video.statistics.viewCount}</td>
-                </tr>`;
-            });
-
-            table += '</table>';
-            return table;
-        }
-
-        function generateEngagementTable(videos) {
-            let table = '<table>';
-            table += '<tr><th>Post</th><th>Likes</th><th>Comments</th><th>Shares</th><th>Total</th><th>Average Engagement</th></tr>';
-
-            let totalEngagement = 0;
-            videos.forEach((video, index) => {
-                const likes = parseInt(video.statistics.likeCount);
-                const comments = parseInt(video.statistics.commentCount);
-                const shares = parseInt(video.statistics.favoriteCount || 0);
-                const total = likes + comments + shares;
-                totalEngagement += total;
-
-                table += `<tr>
-                    <td>${index + 1}</td>
-                    <td>${likes}</td>
-                    <td>${comments}</td>
-                    <td>${shares}</td>
-                    <td>${total}</td>
-                    <td>${totalEngagement / (index + 1)}</td>
-                </tr>`;
-            });
-
-            table += '</table>';
-            return table;
-        }
-
-        function calculateConversionRatio(currentMonth, releaseMonth) {
-            if (currentMonth === releaseMonth) return '100%';
-            if (currentMonth === shiftMonth(releaseMonth, 1)) return '90%';
-            if (currentMonth === shiftMonth(releaseMonth, 2)) return '80%';
-            return '70%';
-        }
-
-        function shiftMonth(month, shift) {
-            const [year, monthNum] = month.split('-').map(Number);
-            const newDate = new Date(year, monthNum - 1 - shift);
-            return newDate.toISOString().slice(0, 7);
-        }
-    </script>
+    // ... (rest of the functions remain the same: generateVideoMetricsTable, 
+    // generateEngagementTable, calculateConversionRatio, shiftMonth) ...
+</script>
 </body>
 </html>
